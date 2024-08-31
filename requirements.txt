@@ -1,0 +1,5 @@
+telethon
+ttkbootstrap
+requests
+aiohttp
+cryptography

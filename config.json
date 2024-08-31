@@ -1,10 +1,9 @@
 {
+    "private_key": "",
     "api_id": "",
     "api_hash": "",
     "phone_number": "+",
-    "discord": "https://discord.com/api/webhooks/1250518478864257134/aLMI06FkezbKCSgV00yCq7xBVeXKGlzjwKeA5H4K-3AJb-7dkLR8b81bfzWrNK6wjzNd",
-    "privatekey": "", 
-    "amount_to_swap": 0.01,
-    "slippage": 30, 
-	"priority_fee": 0.005
+    "amount_to_swap": "0.001",
+    "chatid": "",
+    "discord": ""
 }

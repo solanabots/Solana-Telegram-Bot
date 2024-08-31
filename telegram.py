@@ -8,10 +8,9 @@ import requests
 import aiohttp
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from solders.keypair import Keypair
-from solanatracker import SolanaTracker
 import base64
-from solders.transaction import Transaction
+from predator_sdk import PredatorSDK
+import traceback
 print("Launching bot")
 sys.stdout.flush()
 
@@ -23,17 +22,14 @@ BASE58_PATTERN = re.compile(r'[1-9A-HJ-NP-Za-km-z]{32,44}')
 
 # Argument parser setup
 parser = argparse.ArgumentParser(description='Telegram Bot for Solana Swaps')
+parser.add_argument('--private_key', required=True, help='Private Key for Solana Wallet')
 parser.add_argument('--api_id', required=True, help='Telegram API ID')
 parser.add_argument('--api_hash', required=True, help='Telegram API Hash')
 parser.add_argument('--phone_number', required=True, help='Telegram Phone Number')
 parser.add_argument('--amount_to_swap', required=True, type=float, help='Amount to Swap')
-parser.add_argument('--slippage', required=True, type=float, help='Slippage')
-parser.add_argument('--priority_fee', required=True, type=float, help='Priority Fee')
 parser.add_argument('--chatid', required=False, default='', help='Telegram Chat ID')
 parser.add_argument('--discord', required=False, help='Discord Webhook URL')
 parser.add_argument('--session_string', required=False, help='Telegram Session String')
-parser.add_argument('--private_key', required=True, help='Private Key for Solana Wallet')
-parser.add_argument('--api_key', required=True, help='API Key for Validation')
 
 args = parser.parse_args()
 
@@ -41,12 +37,9 @@ api_id = args.api_id
 api_hash = args.api_hash
 phone_number = args.phone_number
 AMOUNT_TO_SWAP = args.amount_to_swap
-SLIPPAGE = args.slippage
-PRIORITY_FEE = args.priority_fee
 CHAT_ID = args.chatid
 DISCORD_WEBHOOK_URL = args.discord
 PRIVATE_KEY = args.private_key
-api_key = args.api_key
 
 PAIR_TOKEN_PATTERN = re.compile(r'[a-z0-9]{44}')  # Adjust the pattern if needed
 
@@ -65,56 +58,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
+# Initialize PredatorSDK
+sdk = PredatorSDK()
 
-async def perform_swap_with_jito(soltracker, swap_response: dict) -> str:
-    try:
-        serialized_transaction = base64.b64decode(swap_response["txn"])
-        txn = Transaction.from_bytes(serialized_transaction)
-        blockhash = soltracker.connection.get_latest_blockhash().value.blockhash
+async def get_pool_info(pair_token: str):
+    url = f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_token}"
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                pairs = data.get("pairs", [])
+                if pairs:
+                    for token in pairs:
+                        contract_id = token["baseToken"]["address"]
+                        return contract_id
+    return None
 
-        txn.sign([soltracker.keypair], blockhash)
-        print(txn)
-        #response = soltracker.connection.send_raw_transaction(bytes(txn))
-        #return soltracker.confirm_transaction(str(response.value))
-    except Exception as e:
-            return False
-
-async def perform_swap(to_token: str):
-    try:
-        keypair = Keypair.from_base58_string(PRIVATE_KEY)
-
-        solana_tracker = SolanaTracker(keypair, "https://api.solanatracker.io/rpc")
-
-        swap_response = await solana_tracker.get_swap_instructions(
-            "So11111111111111111111111111111111111111112",  # From Token (SOL)
-            to_token,  # To Token (found in tweet)
-            AMOUNT_TO_SWAP,  # Amount to swap from config.json
-            SLIPPAGE,  # Slippage from config.json
-            str(keypair.pubkey()),  # Payer public key
-            PRIORITY_FEE,  # Priority fee from config.json (Recommended while network is congested)
-            True,  # Force legacy transaction for Jupiter
-        )
-
-        txid = perform_swap_with_jito(solana_tracker, swap_response)
-        print("Transaction ID:", txid)
-
-        #txid = await solana_tracker.perform_swap(swap_response)
-
-        print("Transaction ID:", txid)
-        print("Transaction URL:", f"https://solscan.io/tx/{txid}")
-        sys.stdout.flush()
-
-        # Check if the Discord webhook URL is set before notifying
-        if DISCORD_WEBHOOK_URL:
-            notify_discord(txid)
-        
-    except Exception as e:
-        print(f"Error performing swap: {e}")
-        sys.stdout.flush()
-
-def notify_discord(txid: str):
+def notify_discord(result: str):
     message = {
-        "content": f"Swap successful!\nTransaction ID: {txid}\nTransaction URL: https://solscan.io/tx/{txid}"
+        "content": f"Swap successful!\n {result}"
     }
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=message)
@@ -141,30 +104,40 @@ def find_first_token_or_public_key(text: str):
         if is_base58(key):
             return key, 'public_key'
 
-
     return None, None
-
-async def get_pool_info(pair_token: str):
-    url = f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_token}"
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                pairs = data.get("pairs", [])
-                if pairs:
-                    for token in pairs:
-                        contract_id = token["baseToken"]["address"]
-                        return contract_id
-    return None
-
+async def perform_swap(token_address):
+    try:
+        print(f"Attempting to swap {AMOUNT_TO_SWAP} for token address: {token_address}")
+        sys.stdout.flush()
+        
+        result = await sdk.buy({
+            'privateKeys': PRIVATE_KEY,
+            'tokenAddress': token_address,
+            'amount': str(AMOUNT_TO_SWAP),
+        })
+        
+        print('Swap successful:', result)
+        sys.stdout.flush()
+        
+        notify_discord(result)
+    except Exception as error:
+        print(f'Swap operation failed. Error details:')
+        print(f'Error type: {type(error).__name__}')
+        print(f'Error message: {str(error)}')
+        print('Traceback:')
+        traceback.print_exc()
+        sys.stdout.flush()
+        
+        # Optionally, you can notify about the failed swap
+        if DISCORD_WEBHOOK_URL:
+            notify_discord_error(str(error))
 async def process_message(event):
     message_text = event.message.text
     token, token_type = find_first_token_or_public_key(message_text)
 
     if token:
         if token_type == 'public_key':
-            print(f'Found Solana public key: {token}')
+            print(f'Found quote mint: {token}')
             sys.stdout.flush()
             await perform_swap(token)
         elif token_type == 'pair_token':
@@ -192,38 +165,34 @@ else:
     async def handler(event):
         await process_message(event)
 
-def check_api_key_status(api_key: str) -> bool:
-    try:
-        response = requests.post(
-            'https://client.predator.bot/validatetelegram.php',
-            data={'api_key': api_key},
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
-        )
-        
-        response_data = response.json()
-        
-        # Check if the status in response data is active
-        return response_data.get('status') == 'active'
-        
-    except Exception as error:
-        print(f'Error validating API key: {error}')
-        sys.stdout.flush()
-        return False
-        
 # Run the client
 async def main():
-    await client.start(phone_number)
-    # Save the session string to config
-    session_string = client.session.save()
-    print(f"Session String: {session_string}")
-    sys.stdout.flush()
-    await client.run_until_disconnected()
+    try:
+        print("Initializing PredatorSDK...")
+        sys.stdout.flush()
+        await sdk.initialize()  # Initialize the PredatorSDK
+        print("PredatorSDK initialized successfully.")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"Failed to initialize PredatorSDK: {str(e)}")
+        sys.stdout.flush()
+        # You might want to exit here if SDK initialization is critical
+        # sys.exit(1)
+    
+    try:
+        print("Starting Telegram client...")
+        sys.stdout.flush()
+        await client.start(phone_number)
+        print("Telegram client started successfully.")
+        sys.stdout.flush()
+        # Save the session string to config
+        session_string = client.session.save()
+        print(f"Session String: {session_string}")
+        sys.stdout.flush()
+        await client.run_until_disconnected()
+    except Exception as e:
+        print(f"Error in Telegram client: {str(e)}")
+        sys.stdout.flush()
 
 if __name__ == '__main__':
-    api_key_validity_status = check_api_key_status(api_key)
-    
-    if not api_key_validity_status:
-        print("Invalid API Key")
-        sys.stdout.flush()
-        exit(1)
     asyncio.run(main())
