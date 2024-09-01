@@ -21,8 +21,8 @@ This project implements a Telegram bot that monitors specified chats for Solana 
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/telegram-solana-sniper.git
-   cd telegram-solana-sniper
+   git clone https://github.com/solanabots/Solana-Telegram-Bot
+   cd Solana-Telegram-Bot
    ```
 
 2. Install the required packages:
