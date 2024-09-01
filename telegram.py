@@ -18,8 +18,8 @@ sys.stdout.flush()
 BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 # Pre-compiled regex pattern to find potential base58 strings
-BASE58_PATTERN = re.compile(r'[1-9A-HJ-NP-Za-km-z]{32,44}')
-
+BASE58_PATTERN = re.compile(r'[1-9A-HJ-NP-Za-km-z]{32}')
+PAIR_TOKEN_PATTERN = re.compile(r'[a-zA-Z0-9]{33,64}')  # Updated pattern for pair tokens
 # Argument parser setup
 parser = argparse.ArgumentParser(description='Telegram Bot for Solana Swaps')
 parser.add_argument('--private_key', required=True, help='Private Key for Solana Wallet')
@@ -41,7 +41,6 @@ CHAT_ID = args.chatid
 DISCORD_WEBHOOK_URL = args.discord
 PRIVATE_KEY = args.private_key
 
-PAIR_TOKEN_PATTERN = re.compile(r'[a-z0-9]{44}')  # Adjust the pattern if needed
 
 # Load or create a new StringSession
 session_string = args.session_string
@@ -149,8 +148,8 @@ async def process_message(event):
                 sys.stdout.flush()
                 await perform_swap(quote_mint)
             else:
-                print('No quote mint found for the pair token.')
                 sys.stdout.flush()
+                await perform_swap(token)
     else:
         print('No Solana public keys or pair tokens found.')
         sys.stdout.flush()
